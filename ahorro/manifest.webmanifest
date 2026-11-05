@@ -1,7 +1,7 @@
 {
   "id": "./",
-  "name": "Alcancía: ahorro y metas",
-  "short_name": "Alcancía",
+  "name": "AV ahorros: ahorro y metas",
+  "short_name": "AV ahorros",
   "description": "Ahorra para tus metas y controla tu presupuesto. Tus datos se quedan en tu dispositivo.",
   "lang": "es",
   "start_url": "./",

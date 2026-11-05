@@ -1,4 +1,4 @@
-/* Lógica pura de Alcancía: sin acceso al DOM ni al almacenamiento.
+/* Lógica pura de AV ahorros: sin acceso al DOM ni al almacenamiento.
    Los montos se guardan como enteros en centésimas para evitar errores de redondeo. */
 (function (root) {
   'use strict';
@@ -131,8 +131,8 @@
   /* Valida un respaldo sin confiar en su contenido y conserva solo los campos conocidos. */
   function sanitizeBackup(input) {
     const fail = (msg) => { throw new Error(msg); };
-    if (!input || typeof input !== 'object' || Array.isArray(input)) fail('El archivo no es un respaldo de Alcancía.');
-    if (input.app !== 'alcancia') fail('El archivo no es un respaldo de Alcancía.');
+    if (!input || typeof input !== 'object' || Array.isArray(input)) fail('El archivo no es un respaldo de AV ahorros.');
+    if (input.app !== 'alcancia') fail('El archivo no es un respaldo de AV ahorros.');
     if (input.schema !== SCHEMA) fail('Este respaldo es de una versión que esta app no reconoce.');
     if (!CURRENCIES.some(([code]) => code === input.currency)) fail('El respaldo tiene una moneda no válida.');
     ['goals', 'moves', 'txs', 'categories'].forEach((k) => {

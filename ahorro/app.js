@@ -1,10 +1,10 @@
-/* Interfaz de Alcancía. Todo texto del usuario pasa por esc() antes de llegar al HTML. */
+/* Interfaz de AV ahorros. Todo texto del usuario pasa por esc() antes de llegar al HTML. */
 (function () {
   'use strict';
 
   const C = window.AlcanciaCore;
   const KEY = 'alcancia.v1';
-  const VERSION = '1.0.1';
+  const VERSION = '1.1.0';
   const MAX_IMPORT_BYTES = 5 * 1024 * 1024;
   const BACKUP_AFTER_DAYS = 30;
   const BACKUP_AFTER_RECORDS = 5;
@@ -253,7 +253,7 @@
     const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
     let install = '';
     if (!standalone && installPrompt) {
-      install = '<button class="btn primary" type="button" data-action="install">Instalar Alcancía</button>';
+      install = '<button class="btn primary" type="button" data-action="install">Instalar AV ahorros</button>';
     } else if (!standalone && isIOS) {
       install = '<p class="muted small">En Safari, toca Compartir y luego “Agregar a inicio”.</p>';
     } else if (!standalone) {
@@ -270,11 +270,11 @@
       + '<button class="btn" type="button" data-action="import">Restaurar respaldo</button></div>'
       + '<input id="import-file" type="file" accept="application/json,.json" hidden aria-label="Archivo de respaldo"></section>'
       + (install ? '<section class="card setting"><h2>Instalar la app</h2>' + install + '</section>' : '')
-      + '<section class="card setting"><h2>Privacidad</h2><p class="muted small">Sin cuentas ni seguimiento: Alcancía no envía tus datos a ningún servidor.</p>'
+      + '<section class="card setting"><h2>Privacidad</h2><p class="muted small">Sin cuentas ni seguimiento: AV ahorros no envía tus datos a ningún servidor.</p>'
       + '<a class="btn" href="privacidad.html">Leer el aviso de privacidad</a></section>'
       + '<section class="card setting"><h2>Borrar datos</h2><p class="muted small">Elimina todas tus metas, movimientos y categorías de este dispositivo.</p>'
       + '<button class="btn danger" type="button" data-action="erase">Borrar todo</button></section>'
-      + '<p class="muted small">Alcancía ' + VERSION + '</p>';
+      + '<p class="muted small">AV ahorros ' + VERSION + '</p>';
   }
 
   function currencyOptions(selected) {
@@ -589,7 +589,7 @@
     const today = C.todayISO();
     state.lastBackup = today;
     save();
-    downloadFile('alcancia-respaldo-' + today + '.json', JSON.stringify(Object.assign({ app: 'alcancia' }, state), null, 2));
+    downloadFile('av-ahorros-respaldo-' + today + '.json', JSON.stringify(Object.assign({ app: 'alcancia' }, state), null, 2));
     render();
     toast('Respaldo descargado. Guárdalo en un lugar seguro.');
   }
@@ -600,7 +600,7 @@
     try {
       incoming = C.sanitizeBackup(JSON.parse(await file.text()));
     } catch (e) {
-      toast(e instanceof SyntaxError ? 'El archivo no es un respaldo de Alcancía.' : e.message);
+      toast(e instanceof SyntaxError ? 'El archivo no es un respaldo de AV ahorros.' : e.message);
       return;
     }
     const yes = await ask({
@@ -733,7 +733,7 @@
       location.hash = '';
       render();
     },
-    'download-raw': () => downloadFile('alcancia-datos-danados.json', fatalRaw),
+    'download-raw': () => downloadFile('av-ahorros-datos-danados.json', fatalRaw),
   };
 
   document.addEventListener('click', (event) => {

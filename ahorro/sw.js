@@ -1,5 +1,5 @@
 /* Sube CACHE en cada publicación para que los dispositivos reciban los archivos nuevos. */
-const CACHE = 'alcancia-1.0.1';
+const CACHE = 'av-ahorros-1.1.0';
 const FILES = [
   './',
   'index.html',
@@ -34,7 +34,7 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil((async () => {
     const names = await caches.keys();
-    await Promise.all(names.filter((n) => n.startsWith('alcancia-') && n !== CACHE).map((n) => caches.delete(n)));
+    await Promise.all(names.filter((n) => n.startsWith('av-ahorros-') && n !== CACHE).map((n) => caches.delete(n)));
     await self.clients.claim();
   })());
 });
