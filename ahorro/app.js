@@ -4,7 +4,8 @@
 
   const C = window.AlcanciaCore;
   const KEY = 'alcancia.v1';
-  const VERSION = '1.1.0';
+  const VERSION = '1.2.0';
+  const INSTALL_HIDDEN_KEY = 'avahorros.instalar.oculto';
   const MAX_IMPORT_BYTES = 5 * 1024 * 1024;
   const BACKUP_AFTER_DAYS = 30;
   const BACKUP_AFTER_RECORDS = 5;
@@ -26,6 +27,7 @@
   let viewMonth = C.todayISO().slice(0, 7);
   let onboardStep = 1;
   let installPrompt = null;
+  let justInstalled = false;
   let lastRoute = null;
   let toastTimer = 0;
 
@@ -163,6 +165,7 @@
         ? '<div class="notice"><p><strong>Guarda un respaldo.</strong> Tus datos solo están en este dispositivo; si se borran, no se pueden recuperar.</p>'
           + '<button class="btn" type="button" data-action="export">Guardar respaldo</button></div>'
         : '')
+      + '<div data-install="inicio"></div>'
       + '<section class="section"><div class="section-head"><h2>Tus metas</h2><a class="btn link" href="#metas">Ver todas</a></div>'
       + (active.length
         ? '<div class="stack">' + active.slice(0, 3).map(goalCard).join('') + '</div>'
@@ -249,16 +252,6 @@
   }
 
   function viewAjustes() {
-    const standalone = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
-    const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
-    let install = '';
-    if (!standalone && installPrompt) {
-      install = '<button class="btn primary" type="button" data-action="install">Instalar AV ahorros</button>';
-    } else if (!standalone && isIOS) {
-      install = '<p class="muted small">En Safari, toca Compartir y luego “Agregar a inicio”.</p>';
-    } else if (!standalone) {
-      install = '<p class="muted small">Si tu navegador lo permite, busca “Instalar” o “Agregar a la pantalla de inicio” en su menú.</p>';
-    }
     return '<h1 class="page-title">Ajustes</h1>'
       + '<section class="card setting"><h2><label for="set-currency">Moneda</label></h2>'
       + '<select class="input" id="set-currency">' + currencyOptions(state.currency) + '</select>'
@@ -269,12 +262,60 @@
       + '<div class="btn-row"><button class="btn" type="button" data-action="export">Guardar respaldo</button>'
       + '<button class="btn" type="button" data-action="import">Restaurar respaldo</button></div>'
       + '<input id="import-file" type="file" accept="application/json,.json" hidden aria-label="Archivo de respaldo"></section>'
-      + (install ? '<section class="card setting"><h2>Instalar la app</h2>' + install + '</section>' : '')
+      + '<div data-install="ajustes"></div>'
       + '<section class="card setting"><h2>Privacidad</h2><p class="muted small">Sin cuentas ni seguimiento: AV ahorros no envía tus datos a ningún servidor.</p>'
       + '<a class="btn" href="privacidad.html">Leer el aviso de privacidad</a></section>'
       + '<section class="card setting"><h2>Borrar datos</h2><p class="muted small">Elimina todas tus metas, movimientos y categorías de este dispositivo.</p>'
       + '<button class="btn danger" type="button" data-action="erase">Borrar todo</button></section>'
       + '<p class="muted small">AV ahorros ' + VERSION + '</p>';
+  }
+
+  /* ---------- Instalación ---------- */
+
+  function installMode() {
+    const standalone = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+    if (standalone || justInstalled) return null;
+    if (installPrompt) return 'prompt';
+    const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent)
+      || (/macintosh/i.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
+    return isIOS ? 'ios' : 'manual';
+  }
+
+  function installHidden() {
+    try {
+      return localStorage.getItem(INSTALL_HIDDEN_KEY) === '1';
+    } catch (e) {
+      return false;
+    }
+  }
+
+  const IOS_STEPS = 'Toca el botón Compartir del navegador y luego “Agregar a inicio”.';
+  const INSTALL_BUTTON = '<button class="btn primary" type="button" data-action="install">Instalar AV ahorros</button>';
+
+  function installHtml(slot, mode) {
+    if (!mode) return '';
+    if (slot === 'ajustes') {
+      let body = INSTALL_BUTTON;
+      if (mode === 'ios') body = '<p class="muted small">' + IOS_STEPS + '</p>';
+      if (mode === 'manual') body = '<p class="muted small">Si tu navegador lo permite, busca “Instalar” o “Agregar a la pantalla de inicio” en su menú.</p>';
+      return '<section class="card setting"><h2>Instalar la app</h2>' + body + '</section>';
+    }
+    if (mode === 'manual') return '';
+    if (slot === 'inicio' && installHidden()) return '';
+    const text = mode === 'ios'
+      ? '<strong>Instala AV ahorros.</strong> ' + IOS_STEPS
+      : '<strong>Instala AV ahorros.</strong> Ábrela desde tu pantalla de inicio, incluso sin internet.';
+    const later = slot === 'inicio' ? '<button class="btn" type="button" data-action="install-hide">Ahora no</button>' : '';
+    const actions = (mode === 'prompt' ? INSTALL_BUTTON : '') + later;
+    return '<div class="notice"><p>' + text + '</p>' + (actions ? '<div class="notice-actions">' + actions + '</div>' : '') + '</div>';
+  }
+
+  /* Actualiza solo estos espacios: volver a dibujar la pantalla borraría lo que se esté escribiendo. */
+  function fillInstallSlots() {
+    const mode = installMode();
+    main.querySelectorAll('[data-install]').forEach((slot) => {
+      slot.innerHTML = installHtml(slot.dataset.install, mode);
+    });
   }
 
   function currencyOptions(selected) {
@@ -291,6 +332,7 @@
         + '<li><strong>Tu mes a la vista</strong>Controla ingresos y gastos para saber cuánto puedes apartar.</li>'
         + '<li><strong>Tus datos son tuyos</strong>Sin cuentas: todo se guarda solo en este dispositivo, así que guarda respaldos de vez en cuando.</li></ul>'
         + '<button class="btn primary block" type="button" data-action="onboard-next">Empezar</button>'
+        + '<div data-install="bienvenida"></div>'
         + '<a class="btn link" href="privacidad.html">Aviso de privacidad</a></div>';
     }
     if (onboardStep === 2) {
@@ -326,6 +368,7 @@
       main.innerHTML = viewWelcome();
       const form = main.querySelector('form');
       if (form) bindForm(form, submitGoal(null, () => finishOnboarding()));
+      fillInstallSlots();
       window.scrollTo(0, 0);
       return;
     }
@@ -345,6 +388,7 @@
 
     main.innerHTML = html;
     main.querySelectorAll('[data-pct]').forEach((el) => { el.style.width = el.dataset.pct + '%'; });
+    fillInstallSlots();
     nav.querySelectorAll('a').forEach((a) => {
       if (a.dataset.route === current) a.setAttribute('aria-current', 'page');
       else a.removeAttribute('aria-current');
@@ -713,10 +757,20 @@
     import: () => document.getElementById('import-file').click(),
     install: async () => {
       if (!installPrompt) return;
-      installPrompt.prompt();
-      await installPrompt.userChoice;
+      const prompt = installPrompt;
       installPrompt = null;
-      render();
+      try {
+        await prompt.prompt();
+        await prompt.userChoice;
+      } catch (e) {
+        toast('No se pudo abrir la instalación. Búscala en el menú de tu navegador.');
+      }
+      fillInstallSlots();
+    },
+    'install-hide': () => {
+      try { localStorage.setItem(INSTALL_HIDDEN_KEY, '1'); } catch (e) { /* solo se oculta en esta visita */ }
+      const slot = main.querySelector('[data-install="inicio"]');
+      if (slot) slot.innerHTML = '';
     },
     erase: async () => {
       const yes = await ask({
@@ -726,7 +780,10 @@
         danger: true,
       });
       if (!yes) return;
-      try { localStorage.removeItem(KEY); } catch (e) { /* el estado se reinicia igualmente */ }
+      try {
+        localStorage.removeItem(KEY);
+        localStorage.removeItem(INSTALL_HIDDEN_KEY);
+      } catch (e) { /* el estado se reinicia igualmente */ }
       state = load().state || C.emptyState();
       onboardStep = 1;
       lastRoute = null;
@@ -773,7 +830,14 @@
   window.addEventListener('beforeinstallprompt', (event) => {
     event.preventDefault();
     installPrompt = event;
-    if (location.hash === '#ajustes') render();
+    fillInstallSlots();
+  });
+
+  window.addEventListener('appinstalled', () => {
+    installPrompt = null;
+    justInstalled = true;
+    fillInstallSlots();
+    toast('AV ahorros quedó instalada.');
   });
 
   /* ---------- Arranque ---------- */

@@ -178,6 +178,8 @@ main {
 a.card:hover, .row-card:hover { border-color: var(--brand); }
 .row-card { width: 100%; text-align: left; cursor: pointer; }
 .section-title { font-size: 19px; font-weight: 750; letter-spacing: -.01em; }
+[data-install]:empty { display: none; }
+.notice-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .stack { display: flex; flex-direction: column; gap: 10px; }
 .card-top { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 0 12px; }
 .card-title { font-weight: 700; overflow-wrap: anywhere; min-width: 0; }
