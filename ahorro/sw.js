@@ -1,5 +1,5 @@
 /* Sube CACHE en cada publicación para que los dispositivos reciban los archivos nuevos. */
-const CACHE = 'alcancia-1.0.0';
+const CACHE = 'alcancia-1.0.1';
 const FILES = [
   './',
   'index.html',
@@ -18,7 +18,15 @@ const FILES = [
 self.addEventListener('install', (event) => {
   event.waitUntil((async () => {
     const cache = await caches.open(CACHE);
-    await cache.addAll(FILES.map((url) => new Request(url, { cache: 'reload' })));
+    await Promise.all(FILES.map(async (url) => {
+      const response = await fetch(new Request(url, { cache: 'reload' }));
+      if (!response.ok) throw new Error('No se pudo guardar ' + url);
+      /* El alojamiento redirige las rutas .html, y una respuesta redirigida no sirve para navegar. */
+      const stored = response.redirected
+        ? new Response(await response.blob(), { status: response.status, statusText: response.statusText, headers: response.headers })
+        : response;
+      await cache.put(url, stored);
+    }));
     await self.skipWaiting();
   })());
 });
