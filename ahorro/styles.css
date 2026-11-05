@@ -109,6 +109,7 @@ main {
   .nav a:hover { background: var(--surface-2); }
   .nav a[aria-current="page"] { background: var(--surface-2); }
   main { padding: 40px 32px 56px; width: 100%; }
+  .nav[hidden] ~ main { grid-column: 1 / -1; }
 }
 
 /* Texto */

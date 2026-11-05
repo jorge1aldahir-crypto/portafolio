@@ -4,7 +4,7 @@
 
   const C = window.AlcanciaCore;
   const KEY = 'alcancia.v1';
-  const VERSION = '1.2.0';
+  const VERSION = '1.2.1';
   const INSTALL_HIDDEN_KEY = 'avahorros.instalar.oculto';
   const MAX_IMPORT_BYTES = 5 * 1024 * 1024;
   const BACKUP_AFTER_DAYS = 30;
