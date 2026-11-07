@@ -182,6 +182,8 @@ a.card:hover, .row-card:hover { border-color: var(--brand); }
 [data-install]:empty { display: none; }
 
 /* Estadísticas */
+.stats-every { display: flex; flex-direction: column; gap: 8px; }
+.stats-every > .field-label { font-weight: 650; font-size: 15px; }
 .table-wrap { border: 1px solid var(--line); border-radius: 18px; background: var(--surface); overflow: hidden; }
 .stats { width: 100%; border-collapse: collapse; font-size: 14px; }
 .stats th, .stats td { padding: 12px; text-align: left; vertical-align: top; border-top: 1px solid var(--line); }

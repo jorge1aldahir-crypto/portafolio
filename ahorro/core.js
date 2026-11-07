@@ -37,6 +37,7 @@
       txs: [],
       categories: DEFAULT_CATEGORIES.map((name) => ({ id: newId(), name, budget: 0 })),
       auto: defaultAuto(),
+      statsEvery: null,
     };
   }
 
@@ -311,6 +312,7 @@
       lastBackup: typeof input.lastBackup === 'string' && isDate(input.lastBackup) ? input.lastBackup : null,
       goals, moves, txs, categories,
       auto: sanitizeAuto(input.auto, goalIds),
+      statsEvery: Number.isSafeInteger(input.statsEvery) && input.statsEvery >= 1 && input.statsEvery <= MAX_AUTO_DAYS ? input.statsEvery : null,
     };
     if (goals.some((g) => goalBalance(state, g.id) < 0)) fail('El respaldo tiene una meta con saldo negativo.');
     return state;
@@ -352,8 +354,23 @@
     return stats;
   }
 
+  /* Cuánto aportar cada cierto número de días para llegar a la fecha límite.
+     Aportes que quedan = días hasta la fecha límite entre el periodo, redondeado hacia arriba (al menos 1).
+     Monto = lo que falta entre esos aportes, redondeado hacia arriba al centavo para no quedarse corto. */
+  function neededPerPeriod(state, goal, today, every) {
+    const remaining = Math.max(0, goal.target - goalBalance(state, goal.id));
+    const result = { every, remaining, daysLeft: null, periods: null, amount: null, reason: null };
+    if (!remaining) { result.reason = 'done'; return result; }
+    if (!goal.deadline) { result.reason = 'noDeadline'; return result; }
+    result.daysLeft = daysBetween(today, goal.deadline);
+    if (result.daysLeft < 0) { result.reason = 'past'; return result; }
+    result.periods = Math.max(1, Math.ceil(result.daysLeft / every));
+    result.amount = Math.ceil(remaining / result.periods);
+    return result;
+  }
+
   root.AlcanciaCore = {
-    SCHEMA, MAX_AMOUNT, MAX_NAME, MAX_NOTE, MAX_AUTO_DAYS, CURRENCIES, goalStats,
+    SCHEMA, MAX_AMOUNT, MAX_NAME, MAX_NOTE, MAX_AUTO_DAYS, CURRENCIES, goalStats, neededPerPeriod,
     newId, emptyState, parseAmount, centsToInput, todayISO, isDate, shiftMonth, daysBetween,
     signed, goalBalance, totalSaved, monthSummary, categorySpend, byDateDesc, sanitizeBackup,
     addDays, activeGoals, autoPool, autoTargets, distribute, autoPreview, runAuto, normalizeSplits,

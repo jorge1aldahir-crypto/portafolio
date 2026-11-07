@@ -4,7 +4,7 @@
 
   const C = window.AlcanciaCore;
   const KEY = 'alcancia.v1';
-  const VERSION = '1.6.0';
+  const VERSION = '1.7.0';
   const INSTALL_HIDDEN_KEY = 'avahorros.instalar.oculto';
   const MAX_IMPORT_BYTES = 5 * 1024 * 1024;
   const BACKUP_AFTER_DAYS = 30;
@@ -29,6 +29,7 @@
   let installPrompt = null;
   let justInstalled = false;
   let autoCustomOpen = false;
+  let statsCustomOpen = false;
   let lastRoute = null;
   let toastTimer = 0;
 
@@ -263,30 +264,55 @@
     return st.daysLeft === null ? STAT_REASON[st.reason] : '≈ ' + durationText(st.daysLeft);
   }
 
-  function onTimeText(goal, st) {
-    if (!goal.deadline) return 'Sin fecha límite';
-    if (st.onTime === null) return esc(formatDate(goal.deadline));
-    return (st.onTime ? '<span class="done">A tiempo</span>' : '<span class="over">Después de la fecha</span>')
-      + '<span class="sub">' + esc(formatDate(goal.deadline)) + '</span>';
+  /* Periodo para calcular cuánto aportar: el que elija la persona; si no eligió, el del ahorro automático o 7 días. */
+  function statsEvery() {
+    return state.statsEvery || (state.auto.enabled ? state.auto.everyDays : 7);
+  }
+
+  function periodText(every) {
+    return every === 1 ? 'cada día' : 'cada ' + every + ' días';
+  }
+
+  function neededText(goal, st, need) {
+    if (need.reason === 'done') return '—';
+    if (need.reason === 'noDeadline') return 'Ponle fecha límite para calcularlo';
+    if (need.reason === 'past') return '<span class="over">La fecha límite ya pasó</span><span class="sub">' + esc(formatDate(goal.deadline)) + '</span>';
+    const pace = st.onTime === true ? '<span class="done">A tu ritmo, llegas a tiempo</span>'
+      : st.onTime === false ? '<span class="over">A tu ritmo, llegas tarde</span>' : '';
+    return '<strong>' + money(need.amount) + '</strong> ' + periodText(need.every)
+      + '<span class="sub">' + plural(need.periods, 'aporte', 'aportes') + ' hasta el ' + esc(formatDate(goal.deadline)) + '</span>'
+      + (pace ? '<span class="sub">' + pace + '</span>' : '');
   }
 
   function statsTable(goals) {
     const today = C.todayISO();
+    const every = statsEvery();
+    const preset = every === 1 || every === 7 || every === 15;
+    const custom = statsCustomOpen || !preset;
     const cell = (label, html) => '<td data-label="' + label + '"><span class="val">' + html + '</span></td>';
     const rows = goals.map((g) => {
       const st = C.goalStats(state, g, today);
+      const need = C.neededPerPeriod(state, g, today, every);
       return '<tr><th scope="row"><a href="#meta/' + esc(g.id) + '">' + esc(g.name) + '</a></th>'
         + cell('Promedio por aporte', (st.average > 0 ? money(st.average) : '—') + '<span class="sub">' + plural(st.count, 'aporte', 'aportes') + '</span>')
         + cell('Frecuencia', st.everyDays ? everyText(st.everyDays) : '—')
         + cell('Falta', money(st.remaining))
         + cell('Tiempo estimado', esc(estimateText(st)) + (st.eta ? '<span class="sub">' + esc(formatDate(st.eta)) + '</span>' : ''))
-        + cell('Fecha límite', onTimeText(g, st))
+        + cell('Para la fecha límite', neededText(g, st, need))
         + '</tr>';
     }).join('');
     return '<section class="section"><h2 class="section-title">Estadísticas</h2>'
-      + '<p class="muted small">Con el promedio de tus aportes y cada cuánto los haces, calculamos cuánto te falta para cada meta. Se actualiza con cada aporte, incluidos los automáticos.</p>'
+      + '<p class="muted small">Con el promedio de tus aportes y cada cuánto los haces, calculamos cuánto te falta para cada meta. Si la meta tiene fecha límite, también te decimos cuánto aportar en cada periodo para llegar a tiempo.</p>'
+      + '<div class="stats-every"><p class="field-label">Calcular cuánto aportar</p>'
+      + segField('stats-every', 'Periodo para calcular cuánto aportar', [['1', 'Cada día'], ['7', '7 días'], ['15', '15 días'], ['other', 'Otro']], custom ? 'other' : String(every))
+      + (custom
+        ? '<div class="field"><label for="stats-days">Cada cuántos días</label><div class="inline">'
+          + '<input class="input" id="stats-days" type="number" inputmode="numeric" min="1" max="' + C.MAX_AUTO_DAYS + '" value="' + (preset ? '' : every) + '">'
+          + '<button class="btn" type="button" data-action="stats-days">Calcular</button></div></div>'
+        : '')
+      + '</div>'
       + '<div class="table-wrap"><table class="stats"><thead><tr><th scope="col">Meta</th><th scope="col">Promedio por aporte</th><th scope="col">Frecuencia</th>'
-      + '<th scope="col">Falta</th><th scope="col">Tiempo estimado</th><th scope="col">Fecha límite</th></tr></thead>'
+      + '<th scope="col">Falta</th><th scope="col">Tiempo estimado</th><th scope="col">Para la fecha límite</th></tr></thead>'
       + '<tbody>' + rows + '</tbody></table></div></section>';
   }
 
@@ -300,6 +326,13 @@
       text = '<p>A este ritmo llegarías en <strong>' + esc(durationText(st.daysLeft)) + '</strong>, alrededor del <strong>' + esc(formatDate(st.eta)) + '</strong>.</p>';
       if (st.onTime === false) text += '<p class="over">Eso es después de tu fecha límite.</p>';
       if (st.onTime === true) text += '<p class="done">Llegarías antes de tu fecha límite.</p>';
+    }
+    const need = C.neededPerPeriod(state, goal, C.todayISO(), statsEvery());
+    if (need.amount !== null) {
+      text += '<p>Para llegar el ' + esc(formatDate(goal.deadline)) + ': <strong class="money">' + money(need.amount) + ' ' + periodText(need.every) + '</strong> ('
+        + plural(need.periods, 'aporte', 'aportes') + '). Cambia el periodo en Metas → Estadísticas.</p>';
+    } else if (need.reason === 'past') {
+      text += '<p class="over">La fecha límite ya pasó: ponle una nueva para calcular cuánto aportar.</p>';
     }
     const detail = st.count
       ? plural(st.count, 'aporte', 'aportes') + (st.average > 0 ? ' · promedio de ' + money(st.average) : '') + (st.everyDays ? ' · ' + everyText(st.everyDays).toLowerCase() : '')
@@ -1117,6 +1150,16 @@
       }
       setAutoEvery(days);
     },
+    'stats-days': () => {
+      const input = document.getElementById('stats-days');
+      const days = Number(input.value);
+      if (!Number.isInteger(days) || days < 1 || days > C.MAX_AUTO_DAYS) {
+        toast('Escribe un número de días entre 1 y ' + C.MAX_AUTO_DAYS + '.');
+        input.focus();
+        return;
+      }
+      setStatsEvery(days);
+    },
     'auto-splits': splitsForm,
     'split-equal': () => {
       const checked = splitRows().filter((r) => r.on.checked);
@@ -1190,6 +1233,14 @@
 
   /* ---------- Ahorro automático ---------- */
 
+  function setStatsEvery(days) {
+    state.statsEvery = days;
+    statsCustomOpen = days !== 1 && days !== 7 && days !== 15;
+    save();
+    render();
+    refocus(statsCustomOpen ? '#stats-days' : '[name="stats-every"]:checked');
+  }
+
   function setAutoEvery(days) {
     state.auto.everyDays = days;
     state.auto.next = C.addDays(C.todayISO(), days);
@@ -1254,6 +1305,15 @@
       toast('Moneda actualizada. Los montos no se convirtieron.');
     }
     if (event.target.id === 'auto-on') setAutoEnabled(event.target.checked);
+    if (event.target.name === 'stats-every') {
+      if (event.target.value === 'other') {
+        statsCustomOpen = true;
+        render();
+        refocus('#stats-days');
+      } else {
+        setStatsEvery(Number(event.target.value));
+      }
+    }
     if (event.target.name === 'auto-every') {
       if (event.target.value === 'other') {
         autoCustomOpen = true;
@@ -1270,7 +1330,13 @@
   });
   setInterval(applyAuto, 10 * 60 * 1000);
 
-  window.addEventListener('hashchange', () => { closeSheet(); render(); });
+  /* "Otro" solo queda abierto mientras se está escribiendo el número en esa pantalla. */
+  function resetCustomPeriods() {
+    autoCustomOpen = false;
+    statsCustomOpen = false;
+  }
+
+  window.addEventListener('hashchange', () => { closeSheet(); resetCustomPeriods(); render(); });
 
   let resizeTimer = 0;
   window.addEventListener('resize', () => {
@@ -1285,6 +1351,7 @@
     if (result.state) {
       state = result.state;
       closeSheet();
+      resetCustomPeriods();
       render();
     }
   });
