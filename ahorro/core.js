@@ -316,8 +316,44 @@
     return state;
   }
 
+  const MAX_ESTIMATE_DAYS = 36500;
+
+  /* Estadísticas de una meta a partir de todos sus aportes, incluidos los automáticos.
+     Promedio = lo ahorrado neto (aportes menos retiros) entre el número de aportes.
+     Frecuencia = días entre el primer y el último aporte, entre los espacios que hay entre ellos.
+     Estimación = aportes que faltan al promedio, por la frecuencia, contados desde hoy. */
+  function goalStats(state, goal, today) {
+    const moves = state.moves.filter((m) => m.goalId === goal.id);
+    const ins = moves.filter((m) => m.type === 'in').map((m) => m.date).sort();
+    const balance = goalBalance(state, goal.id);
+    const stats = {
+      count: ins.length,
+      balance,
+      remaining: Math.max(0, goal.target - balance),
+      average: null,
+      everyDays: null,
+      daysLeft: null,
+      eta: null,
+      onTime: null,
+      reason: null,
+    };
+    if (!stats.remaining) { stats.reason = 'done'; return stats; }
+    if (ins.length < 2) { stats.reason = 'few'; return stats; }
+    stats.average = Math.floor(balance / ins.length);
+    const span = daysBetween(ins[0], ins[ins.length - 1]);
+    if (span > 0) stats.everyDays = span / (ins.length - 1);
+    if (stats.average <= 0) { stats.reason = 'noProgress'; return stats; }
+    if (!stats.everyDays) { stats.reason = 'sameDay'; return stats; }
+    const days = Math.ceil(Math.ceil(stats.remaining / stats.average) * stats.everyDays);
+    if (days > MAX_ESTIMATE_DAYS) { stats.reason = 'tooLong'; return stats; }
+    stats.daysLeft = days;
+    stats.eta = addDays(today, days);
+    if (goal.deadline) stats.onTime = stats.eta <= goal.deadline;
+    return stats;
+  }
+
   root.AlcanciaCore = {
-    SCHEMA, MAX_AMOUNT, MAX_NAME, MAX_NOTE, MAX_AUTO_DAYS, CURRENCIES,
+    SCHEMA, MAX_AMOUNT, MAX_NAME, MAX_NOTE, MAX_AUTO_DAYS, CURRENCIES, goalStats,
     newId, emptyState, parseAmount, centsToInput, todayISO, isDate, shiftMonth, daysBetween,
     signed, goalBalance, totalSaved, monthSummary, categorySpend, byDateDesc, sanitizeBackup,
     addDays, activeGoals, autoPool, autoTargets, distribute, autoPreview, runAuto, normalizeSplits,

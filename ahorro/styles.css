@@ -181,6 +181,27 @@ a.card:hover, .row-card:hover { border-color: var(--brand); }
 .section-title { font-size: 19px; font-weight: 750; letter-spacing: -.01em; }
 [data-install]:empty { display: none; }
 
+/* Estadísticas */
+.table-wrap { border: 1px solid var(--line); border-radius: 18px; background: var(--surface); overflow: hidden; }
+.stats { width: 100%; border-collapse: collapse; font-size: 14px; }
+.stats th, .stats td { padding: 12px; text-align: left; vertical-align: top; border-top: 1px solid var(--line); }
+.stats thead th { border-top: 0; background: var(--surface-2); color: var(--muted); font-size: 13px; font-weight: 650; }
+.stats td { font-variant-numeric: tabular-nums; }
+.stats .sub { display: block; color: var(--muted); font-size: 13px; }
+.stats th a { color: var(--brand); font-weight: 700; text-decoration: none; overflow-wrap: anywhere; }
+.stats th a:hover { text-decoration: underline; }
+@media (max-width: 639px) {
+  .stats thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  .stats, .stats tbody, .stats tr, .stats th, .stats td { display: block; width: 100%; }
+  .stats tr { padding: 12px 16px; }
+  .stats tr + tr { border-top: 1px solid var(--line); }
+  .stats th, .stats td { border: 0; padding: 4px 0; }
+  .stats th[scope="row"] { padding-bottom: 6px; font-size: 17px; }
+  .stats td { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+  .stats td::before { content: attr(data-label); color: var(--muted); }
+  .stats td .val { text-align: right; }
+}
+
 /* Ahorro automático */
 .auto-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .auto-status { font-size: 15px; }

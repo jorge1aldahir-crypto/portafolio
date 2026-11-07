@@ -4,7 +4,7 @@
 
   const C = window.AlcanciaCore;
   const KEY = 'alcancia.v1';
-  const VERSION = '1.4.0';
+  const VERSION = '1.5.0';
   const INSTALL_HIDDEN_KEY = 'avahorros.instalar.oculto';
   const MAX_IMPORT_BYTES = 5 * 1024 * 1024;
   const BACKUP_AFTER_DAYS = 30;
@@ -231,7 +231,80 @@
         ? '<p class="muted">Llevas <strong class="money">' + money(C.totalSaved(state)) + '</strong> ahorrados en total.</p>'
         : '<div class="empty"><p>Crea tu primera meta: un viaje, un fondo de emergencia o lo que tengas en mente.</p></div>')
       + (active.length ? '<div class="stack">' + active.map(goalCard).join('') + '</div>' : '')
+      + (active.length ? statsTable(active) : '')
       + (reached.length ? '<section class="section"><h2 class="section-title">Alcanzadas</h2><div class="stack">' + reached.map(goalCard).join('') + '</div></section>' : '');
+  }
+
+  /* ---------- Estadísticas ---------- */
+
+  const STAT_REASON = {
+    done: '¡Meta alcanzada!',
+    few: 'Haz al menos 2 aportes para calcular',
+    noProgress: 'Sin avance: los retiros superan a los aportes',
+    sameDay: 'Haz aportes en días distintos para calcular',
+    tooLong: 'Más de 100 años a este ritmo',
+  };
+
+  function durationText(days) {
+    if (days <= 0) return 'hoy';
+    if (days < 60) return plural(days, 'día', 'días');
+    const months = Math.round(days / 30.44);
+    if (months < 24) return plural(months, 'mes', 'meses');
+    const rest = months % 12;
+    return plural(Math.floor(months / 12), 'año', 'años') + (rest ? ' y ' + plural(rest, 'mes', 'meses') : '');
+  }
+
+  function everyText(days) {
+    const rounded = Math.max(1, Math.round(days));
+    return rounded === 1 ? 'Cada día' : 'Cada ' + rounded + ' días';
+  }
+
+  function estimateText(st) {
+    return st.daysLeft === null ? STAT_REASON[st.reason] : '≈ ' + durationText(st.daysLeft);
+  }
+
+  function onTimeText(goal, st) {
+    if (!goal.deadline) return 'Sin fecha límite';
+    if (st.onTime === null) return esc(formatDate(goal.deadline));
+    return (st.onTime ? '<span class="done">A tiempo</span>' : '<span class="over">Después de la fecha</span>')
+      + '<span class="sub">' + esc(formatDate(goal.deadline)) + '</span>';
+  }
+
+  function statsTable(goals) {
+    const today = C.todayISO();
+    const cell = (label, html) => '<td data-label="' + label + '"><span class="val">' + html + '</span></td>';
+    const rows = goals.map((g) => {
+      const st = C.goalStats(state, g, today);
+      return '<tr><th scope="row"><a href="#meta/' + esc(g.id) + '">' + esc(g.name) + '</a></th>'
+        + cell('Promedio por aporte', (st.average > 0 ? money(st.average) : '—') + '<span class="sub">' + plural(st.count, 'aporte', 'aportes') + '</span>')
+        + cell('Frecuencia', st.everyDays ? everyText(st.everyDays) : '—')
+        + cell('Falta', money(st.remaining))
+        + cell('Tiempo estimado', esc(estimateText(st)) + (st.eta ? '<span class="sub">' + esc(formatDate(st.eta)) + '</span>' : ''))
+        + cell('Fecha límite', onTimeText(g, st))
+        + '</tr>';
+    }).join('');
+    return '<section class="section"><h2 class="section-title">Estadísticas</h2>'
+      + '<p class="muted small">Con el promedio de tus aportes y cada cuánto los haces, calculamos cuánto te falta para cada meta. Se actualiza con cada aporte, incluidos los automáticos.</p>'
+      + '<div class="table-wrap"><table class="stats"><thead><tr><th scope="col">Meta</th><th scope="col">Promedio por aporte</th><th scope="col">Frecuencia</th>'
+      + '<th scope="col">Falta</th><th scope="col">Tiempo estimado</th><th scope="col">Fecha límite</th></tr></thead>'
+      + '<tbody>' + rows + '</tbody></table></div></section>';
+  }
+
+  function goalEstimateCard(goal) {
+    const st = C.goalStats(state, goal, C.todayISO());
+    if (st.reason === 'done') return '';
+    let text;
+    if (st.daysLeft === null) {
+      text = '<p>' + esc(STAT_REASON[st.reason]) + '.</p>';
+    } else {
+      text = '<p>A este ritmo llegarías en <strong>' + esc(durationText(st.daysLeft)) + '</strong>, alrededor del <strong>' + esc(formatDate(st.eta)) + '</strong>.</p>';
+      if (st.onTime === false) text += '<p class="over">Eso es después de tu fecha límite.</p>';
+      if (st.onTime === true) text += '<p class="done">Llegarías antes de tu fecha límite.</p>';
+    }
+    const detail = st.count
+      ? plural(st.count, 'aporte', 'aportes') + (st.average > 0 ? ' · promedio de ' + money(st.average) : '') + (st.everyDays ? ' · ' + everyText(st.everyDays).toLowerCase() : '')
+      : 'Sin aportes todavía';
+    return '<section class="card setting"><h2>Estimación</h2>' + text + '<p class="muted small money">' + detail + '</p></section>';
   }
 
   function viewMeta(id) {
@@ -250,6 +323,7 @@
       + '<div class="card-meta"><span>' + goalPct(balance, goal.target) + '%</span><span>' + deadlineText(goal, balance) + '</span></div></section>'
       + '<div class="btn-row"><button class="btn primary" type="button" data-action="new-move" data-id="' + esc(id) + '" data-type="in">Aportar</button>'
       + '<button class="btn" type="button" data-action="new-move" data-id="' + esc(id) + '" data-type="out"' + (balance > 0 ? '' : ' disabled') + '>Retirar</button></div>'
+      + goalEstimateCard(goal)
       + '<section class="section"><h2 class="section-title">Historial</h2>'
       + (moves.length
         ? '<ul class="rows">' + moves.map((m) => {
@@ -595,7 +669,12 @@
       save();
       closeSheet();
       render();
-      if (result >= goal.target && base < goal.target) toast('¡Alcanzaste tu meta “' + goal.name + '”!');
+      if (result >= goal.target && base < goal.target) {
+        toast('¡Alcanzaste tu meta “' + goal.name + '”!');
+      } else if (nextType === 'in' && !move) {
+        const st = C.goalStats(state, goal, C.todayISO());
+        if (st.daysLeft !== null) toast('A este ritmo llegarías a “' + goal.name + '” en ' + durationText(st.daysLeft) + '.');
+      }
     });
     if (!move) sheet.querySelector('[name="amount"]').focus();
   }
