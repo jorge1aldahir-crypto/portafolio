@@ -897,7 +897,7 @@
         + '<span class="split-pct"><input class="input money" name="pct-' + esc(g.id) + '" type="number" inputmode="numeric" min="1" max="100" value="' + (pct || '') + '" aria-label="Porcentaje para ' + esc(g.name) + '"><span aria-hidden="true">%</span></span></div>';
     }).join('');
     openSheet('<form class="form" novalidate><h2 id="sheet-title">¿A qué metas pasar el dinero?</h2>'
-      + '<p class="help">Elige una o varias y reparte el 100%. Si una se completa, su parte se reparte entre las demás.</p>'
+      + '<p class="help">Elige una o varias y reparte el 100%. Las que no marques no reciben nada automático: puedes seguir aportándoles a mano. Si una elegida se completa, su parte se reparte entre las demás.</p>'
       + '<div class="split-rows">' + rows + '</div>'
       + '<div class="head-row"><p class="split-total" aria-live="polite"></p><button class="btn link" type="button" data-action="split-equal">Repartir en partes iguales</button></div>'
       + actions('Guardar')
