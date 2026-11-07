@@ -4,7 +4,7 @@
 
   const C = window.AlcanciaCore;
   const KEY = 'alcancia.v1';
-  const VERSION = '1.5.0';
+  const VERSION = '1.6.0';
   const INSTALL_HIDDEN_KEY = 'avahorros.instalar.oculto';
   const MAX_IMPORT_BYTES = 5 * 1024 * 1024;
   const BACKUP_AFTER_DAYS = 30;
@@ -307,6 +307,191 @@
     return '<section class="card setting"><h2>Estimación</h2>' + text + '<p class="muted small money">' + detail + '</p></section>';
   }
 
+  /* ---------- Ojiva: avance acumulado de una meta ---------- */
+
+  function ogivePoints(goal) {
+    const moves = state.moves.filter((m) => m.goalId === goal.id);
+    if (!moves.length) return null;
+    const byDate = new Map();
+    moves.forEach((m) => byDate.set(m.date, (byDate.get(m.date) || 0) + C.signed(m)));
+    const dates = [...byDate.keys()].sort();
+    const start = goal.createdAt < dates[0] ? goal.createdAt : dates[0];
+    const points = [{ date: start, value: 0, change: 0, origin: true }];
+    let total = 0;
+    dates.forEach((date) => {
+      total += byDate.get(date);
+      points.push({ date, value: total, change: byDate.get(date) });
+    });
+    return points;
+  }
+
+  function niceStep(raw) {
+    const power = Math.pow(10, Math.floor(Math.log10(raw)));
+    const n = raw / power;
+    return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 2.5 ? 2.5 : n <= 5 ? 5 : 10) * power;
+  }
+
+  /* Un mismo estilo para todo el eje: completo por debajo de 10,000 y abreviado si el eje llega a esa cifra. */
+  function moneyShort(cents, big) {
+    const fmt = (value, digits) => new Intl.NumberFormat(lang, {
+      style: 'currency', currency: state.currency, currencyDisplay: 'narrowSymbol',
+      minimumFractionDigits: 0, maximumFractionDigits: digits,
+    }).format(value);
+    const units = cents / 100;
+    if (!big || !units) return fmt(units, 0);
+    return units >= 1000000 ? fmt(units / 1000000, 1) + ' M' : fmt(units / 1000, 1) + ' mil';
+  }
+
+  function shortDate(iso, withYear) {
+    const opts = withYear ? { day: 'numeric', month: 'short', year: '2-digit' } : { day: 'numeric', month: 'short' };
+    return new Intl.DateTimeFormat(lang, opts).format(isoToDate(iso));
+  }
+
+  function ogiveCard(goal) {
+    if (!ogivePoints(goal)) return '';
+    return '<section class="card setting"><h2 id="og-title">Avance acumulado</h2>'
+      + '<p class="muted small">Ojiva: lo que llevas ahorrado en total en cada fecha. La línea punteada que sube es la proyección a tu ritmo actual.</p>'
+      + '<div class="ogive" data-ogive="' + esc(goal.id) + '" tabindex="0" role="group" aria-labelledby="og-title" aria-describedby="og-hint"></div>'
+      + '<p class="muted small" id="og-hint">Toca o pasa el cursor por la gráfica, o usa las flechas del teclado, para ver cada fecha.</p></section>';
+  }
+
+  function drawOgives() {
+    main.querySelectorAll('[data-ogive]').forEach(drawOgive);
+  }
+
+  function drawOgive(slot) {
+    const goal = state.goals.find((g) => g.id === slot.dataset.ogive);
+    const points = goal && ogivePoints(goal);
+    if (!points) { slot.innerHTML = ''; return; }
+    const today = C.todayISO();
+    const st = C.goalStats(state, goal, today);
+    const last = points[points.length - 1];
+    const W = Math.max(280, Math.floor(slot.clientWidth));
+    const H = W < 480 ? 220 : 260;
+    const start = points[0].date;
+    const end = [today, last.date, st.eta, goal.deadline].filter(Boolean).reduce((a, b) => (b > a ? b : a));
+    const span = Math.max(1, C.daysBetween(start, end));
+    const top = Math.max(goal.target, ...points.map((p) => p.value));
+    const step = niceStep(top / 4);
+    const yMax = Math.ceil(top / step) * step;
+    const ticks = [];
+    for (let v = 0; v <= yMax; v += step) ticks.push(v);
+    const compact = yMax >= 1000000;
+    const pad = { t: 30, r: 16, b: 30, l: 14 + Math.max(...ticks.map((v) => moneyShort(v, compact).length)) * 7 };
+    const x = (d) => pad.l + (C.daysBetween(start, d) / span) * (W - pad.l - pad.r);
+    const y = (v) => H - pad.b - (Math.max(0, v) / yMax) * (H - pad.t - pad.b);
+    const n = (v) => Math.round(v * 10) / 10;
+    const withYear = start.slice(0, 4) !== end.slice(0, 4);
+
+    let svg = '';
+    ticks.forEach((v) => {
+      svg += '<line class="og-grid" x1="' + pad.l + '" x2="' + (W - pad.r) + '" y1="' + n(y(v)) + '" y2="' + n(y(v)) + '"/>'
+        + '<text class="og-axis" x="' + (pad.l - 8) + '" y="' + n(y(v) + 4) + '" text-anchor="end">' + esc(moneyShort(v, compact)) + '</text>';
+    });
+    const xTicks = [...new Set([start, C.addDays(start, Math.round(span / 2)), end])];
+    xTicks.forEach((d, i) => {
+      const anchor = i === 0 ? 'start' : i === xTicks.length - 1 ? 'end' : 'middle';
+      svg += '<text class="og-axis" x="' + n(x(d)) + '" y="' + (H - 8) + '" text-anchor="' + anchor + '">' + esc(shortDate(d, withYear)) + '</text>';
+    });
+    if (goal.deadline) {
+      const dx = n(x(goal.deadline));
+      svg += '<line class="og-deadline" x1="' + dx + '" x2="' + dx + '" y1="' + pad.t + '" y2="' + (H - pad.b) + '"/>'
+        + '<text class="og-note" x="' + (dx > pad.l + 90 ? dx - 6 : dx + 6) + '" y="' + (H - pad.b - 8) + '" text-anchor="' + (dx > pad.l + 90 ? 'end' : 'start') + '">Fecha límite</text>';
+    }
+    const ty = n(y(goal.target));
+    const targetText = 'Meta ' + money(goal.target);
+    const etaText = st.daysLeft !== null ? '≈ ' + shortDate(st.eta, true) : '';
+    /* Si la fecha estimada chocaría con el texto de la meta, este baja bajo su línea, donde la gráfica está vacía. */
+    const textWidth = (s) => s.length * 6.6;
+    const etaLeft = etaText ? x(st.eta) - 8 - textWidth(etaText) : Infinity;
+    const targetBelow = etaLeft < pad.l + 4 + textWidth(targetText) + 10;
+    svg += '<line class="og-target" x1="' + pad.l + '" x2="' + (W - pad.r) + '" y1="' + ty + '" y2="' + ty + '"/>'
+      + '<text class="og-note" x="' + (pad.l + 4) + '" y="' + (targetBelow ? ty + 16 : ty - 6) + '">' + esc(targetText) + '</text>';
+
+    const line = points.map((p) => [x(p.date), y(p.value)]);
+    if (today > last.date) line.push([x(today), y(last.value)]);
+    const pts = line.map(([a, b]) => n(a) + ',' + n(b)).join(' ');
+    svg += '<path class="og-area" d="M' + n(line[0][0]) + ',' + n(y(0)) + ' L' + pts.replace(/ /g, ' L') + ' L' + n(line[line.length - 1][0]) + ',' + n(y(0)) + ' Z"/>'
+      + '<polyline class="og-line" points="' + pts + '"/>';
+
+    if (st.daysLeft !== null) {
+      const px = n(x(st.eta));
+      svg += '<line class="og-proj" x1="' + n(line[line.length - 1][0]) + '" y1="' + n(y(last.value)) + '" x2="' + px + '" y2="' + ty + '"/>'
+        + '<circle class="og-proj-dot" cx="' + px + '" cy="' + ty + '" r="4"/>'
+        + '<text class="og-note" x="' + (px - 8) + '" y="' + (ty - 8) + '" text-anchor="end">' + esc(etaText) + '</text>';
+    }
+    const real = points.slice(1);
+    if (real.length <= 40) {
+      real.forEach((p) => { svg += '<circle class="og-dot" cx="' + n(x(p.date)) + '" cy="' + n(y(p.value)) + '" r="4"/>'; });
+    }
+    const lx = x(last.date);
+    const labelLeft = st.daysLeft !== null || lx > W - 90;
+    svg += '<text class="og-label" x="' + n(labelLeft ? lx - 8 : lx + 8) + '" y="' + n(y(last.value) - 10) + '" text-anchor="' + (labelLeft ? 'end' : 'start') + '">' + esc(money(last.value)) + '</text>'
+      + '<line class="og-cross" y1="' + pad.t + '" y2="' + (H - pad.b) + '" visibility="hidden"/>'
+      + '<circle class="og-focus" r="5" visibility="hidden"/>'
+      + '<rect class="og-hit" x="' + pad.l + '" y="0" width="' + (W - pad.l - pad.r) + '" height="' + H + '"/>';
+
+    const summary = 'Avance acumulado de ' + goal.name + ': ' + money(last.value) + ' al ' + formatDate(last.date) + ', de una meta de ' + money(goal.target) + '.'
+      + (st.daysLeft !== null ? ' A tu ritmo actual llegarías alrededor del ' + formatDate(st.eta) + '.' : '');
+    slot.innerHTML = '<svg width="' + W + '" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="' + esc(summary) + '">' + svg + '</svg><div class="og-tip" hidden></div>';
+
+    const svgEl = slot.querySelector('svg');
+    const cross = slot.querySelector('.og-cross');
+    const focus = slot.querySelector('.og-focus');
+    const tip = slot.querySelector('.og-tip');
+    let current = -1;
+    const show = (i) => {
+      current = Math.max(0, Math.min(points.length - 1, i));
+      const p = points[current];
+      const px = x(p.date);
+      const py = y(p.value);
+      cross.setAttribute('x1', px); cross.setAttribute('x2', px); cross.setAttribute('visibility', 'visible');
+      focus.setAttribute('cx', px); focus.setAttribute('cy', py); focus.setAttribute('visibility', 'visible');
+      tip.textContent = '';
+      const value = document.createElement('strong');
+      value.textContent = money(p.value);
+      tip.append(value, formatDate(p.date));
+      if (!p.origin) {
+        const change = document.createElement('span');
+        change.textContent = (p.change >= 0 ? '+' : '−') + money(Math.abs(p.change)) + ' ese día';
+        tip.append(change);
+      } else {
+        const change = document.createElement('span');
+        change.textContent = 'Inicio';
+        tip.append(change);
+      }
+      tip.hidden = false;
+      const tw = tip.offsetWidth;
+      const th = tip.offsetHeight;
+      tip.style.left = Math.max(0, Math.min(W - tw, px - tw / 2)) + 'px';
+      tip.style.top = Math.max(0, py - th - 14) + 'px';
+    };
+    const hide = () => {
+      current = -1;
+      cross.setAttribute('visibility', 'hidden');
+      focus.setAttribute('visibility', 'hidden');
+      tip.hidden = true;
+    };
+    const nearest = (event) => {
+      const px = event.clientX - svgEl.getBoundingClientRect().left;
+      let best = 0;
+      points.forEach((p, i) => { if (Math.abs(x(p.date) - px) < Math.abs(x(points[best].date) - px)) best = i; });
+      show(best);
+    };
+    svgEl.addEventListener('pointermove', nearest);
+    svgEl.addEventListener('pointerdown', nearest);
+    svgEl.addEventListener('pointerleave', (event) => { if (event.pointerType === 'mouse') hide(); });
+    slot.onfocus = () => show(points.length - 1);
+    slot.onblur = hide;
+    slot.onkeydown = (event) => {
+      const moves = { ArrowLeft: -1, ArrowRight: 1 };
+      if (event.key in moves) { event.preventDefault(); show((current < 0 ? points.length - 1 : current) + moves[event.key]); }
+      if (event.key === 'Home') { event.preventDefault(); show(0); }
+      if (event.key === 'End') { event.preventDefault(); show(points.length - 1); }
+      if (event.key === 'Escape') hide();
+    };
+  }
+
   function viewMeta(id) {
     const goal = state.goals.find((g) => g.id === id);
     if (!goal) return null;
@@ -324,6 +509,7 @@
       + '<div class="btn-row"><button class="btn primary" type="button" data-action="new-move" data-id="' + esc(id) + '" data-type="in">Aportar</button>'
       + '<button class="btn" type="button" data-action="new-move" data-id="' + esc(id) + '" data-type="out"' + (balance > 0 ? '' : ' disabled') + '>Retirar</button></div>'
       + goalEstimateCard(goal)
+      + ogiveCard(goal)
       + '<section class="section"><h2 class="section-title">Historial</h2>'
       + (moves.length
         ? '<ul class="rows">' + moves.map((m) => {
@@ -511,6 +697,7 @@
     main.innerHTML = html;
     main.querySelectorAll('[data-pct]').forEach((el) => { el.style.width = el.dataset.pct + '%'; });
     fillInstallSlots();
+    drawOgives();
     nav.querySelectorAll('a').forEach((a) => {
       if (a.dataset.route === current) a.setAttribute('aria-current', 'page');
       else a.removeAttribute('aria-current');
@@ -1084,6 +1271,12 @@
   setInterval(applyAuto, 10 * 60 * 1000);
 
   window.addEventListener('hashchange', () => { closeSheet(); render(); });
+
+  let resizeTimer = 0;
+  window.addEventListener('resize', () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(drawOgives, 150);
+  });
 
   /* Mantiene sincronizadas otras pestañas abiertas para que una no sobrescriba a la otra. */
   window.addEventListener('storage', (event) => {

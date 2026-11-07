@@ -202,6 +202,27 @@ a.card:hover, .row-card:hover { border-color: var(--brand); }
   .stats td .val { text-align: right; }
 }
 
+/* Ojiva */
+.ogive { position: relative; border-radius: 12px; touch-action: pan-y; }
+.ogive:focus-visible { outline: 3px solid var(--amber); outline-offset: 4px; }
+.ogive svg { display: block; width: 100%; height: auto; overflow: visible; }
+.og-grid { stroke: var(--line); stroke-width: 1; }
+.og-axis { fill: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.og-area { fill: var(--brand); fill-opacity: .1; }
+.og-line { fill: none; stroke: var(--brand); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.og-dot, .og-focus { fill: var(--brand); stroke: var(--surface); stroke-width: 2; }
+.og-target { stroke: var(--muted); stroke-width: 1.5; stroke-dasharray: 6 5; }
+.og-deadline { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 2 4; }
+.og-proj { stroke: var(--brand); stroke-width: 2; stroke-dasharray: 6 6; stroke-linecap: round; opacity: .75; }
+.og-proj-dot { fill: var(--surface); stroke: var(--brand); stroke-width: 2; }
+.og-label { fill: var(--ink); font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.og-note { fill: var(--muted); font-size: 12px; font-weight: 600; }
+.og-cross { stroke: var(--muted); stroke-width: 1; }
+.og-hit { fill: transparent; cursor: crosshair; }
+.og-tip { position: absolute; z-index: 2; pointer-events: none; padding: 8px 10px; border-radius: 10px; background: var(--ink); color: var(--bg); font-size: 13px; line-height: 1.35; white-space: nowrap; box-shadow: 0 4px 14px rgba(0, 0, 0, .18); }
+.og-tip strong { display: block; font-size: 15px; font-variant-numeric: tabular-nums; }
+.og-tip span { display: block; opacity: .8; }
+
 /* Ahorro automático */
 .auto-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .auto-status { font-size: 15px; }
