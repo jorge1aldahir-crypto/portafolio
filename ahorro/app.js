@@ -4,7 +4,7 @@
 
   const C = window.AlcanciaCore;
   const KEY = 'alcancia.v1';
-  const VERSION = '1.2.1';
+  const VERSION = '1.3.0';
   const INSTALL_HIDDEN_KEY = 'avahorros.instalar.oculto';
   const MAX_IMPORT_BYTES = 5 * 1024 * 1024;
   const BACKUP_AFTER_DAYS = 30;
@@ -28,6 +28,7 @@
   let onboardStep = 1;
   let installPrompt = null;
   let justInstalled = false;
+  let autoCustomOpen = false;
   let lastRoute = null;
   let toastTimer = 0;
 
@@ -174,11 +175,45 @@
       + '</section>';
   }
 
+  function autoCard() {
+    const auto = state.auto;
+    const preset = auto.everyDays === 7 || auto.everyDays === 15;
+    const custom = autoCustomOpen || !preset;
+    let body;
+    if (!auto.enabled) {
+      body = '<p class="muted small">Cada cierto número de días pasa a tu meta el dinero que te sobra (ingresos menos gastos). Solo funciona si tienes una sola meta en curso.</p>';
+    } else {
+      const goals = C.activeGoals(state);
+      let status;
+      if (!goals.length) {
+        status = state.goals.length ? 'Todas tus metas están completas, así que no hay a dónde pasar el dinero.' : 'Crea una meta para empezar.';
+      } else if (goals.length > 1) {
+        status = '<span class="over">Tienes ' + goals.length + ' metas en curso.</span> Solo funciona con una; mientras tanto no se pasa nada y el dinero espera al siguiente traspaso.';
+      } else {
+        const amount = C.autoAmount(state, goals[0], C.todayISO());
+        status = 'Próximo traspaso: <strong>' + esc(formatDate(auto.next)) + '</strong> a “' + esc(goals[0].name) + '”. '
+          + (amount > 0 ? 'Hoy hay <strong class="money">' + money(amount) + '</strong> para pasar.' : 'Por ahora no hay dinero disponible para pasar.');
+      }
+      body = '<p class="field-label">Pasar el dinero cada</p>' + segField('auto-every', 'Frecuencia', [['7', '7 días'], ['15', '15 días'], ['other', 'Otro']], custom ? 'other' : String(auto.everyDays))
+        + (custom
+          ? '<div class="field"><label for="auto-days">Cada cuántos días</label><div class="inline">'
+            + '<input class="input" id="auto-days" type="number" inputmode="numeric" min="1" max="' + C.MAX_AUTO_DAYS + '" value="' + (preset ? '' : auto.everyDays) + '">'
+            + '<button class="btn" type="button" data-action="auto-days">Guardar</button></div></div>'
+          : '')
+        + '<p class="auto-status">' + status + '</p>'
+        + '<p class="muted small">Cuenta lo que registres desde el ' + esc(formatDate(auto.since)) + '. Se aplica cuando abres la app: si pasaron varios periodos, se pone al día.</p>';
+    }
+    return '<section class="card setting" aria-labelledby="auto-title"><div class="auto-head"><h2 id="auto-title">Ahorro automático</h2>'
+      + '<label class="switch"><input type="checkbox" id="auto-on" role="switch" aria-label="Activar ahorro automático"' + (auto.enabled ? ' checked' : '') + '><span aria-hidden="true"></span></label></div>'
+      + body + '</section>';
+  }
+
   function viewMetas() {
     const withBalance = state.goals.map((g) => ({ g, reached: C.goalBalance(state, g.id) >= g.target }));
     const active = withBalance.filter((x) => !x.reached).map((x) => x.g);
     const reached = withBalance.filter((x) => x.reached).map((x) => x.g);
     return '<div class="head-row"><h1 class="page-title">Metas</h1><button class="btn primary" type="button" data-action="new-goal">Nueva meta</button></div>'
+      + autoCard()
       + (state.goals.length
         ? '<p class="muted">Llevas <strong class="money">' + money(C.totalSaved(state)) + '</strong> ahorrados en total.</p>'
         : '<div class="empty"><p>Crea tu primera meta: un viaje, un fondo de emergencia o lo que tengas en mente.</p></div>')
@@ -659,6 +694,7 @@
     save();
     render();
     toast('Respaldo restaurado.');
+    applyAuto();
   }
 
   /* ---------- Bienvenida ---------- */
@@ -791,7 +827,61 @@
       render();
     },
     'download-raw': () => downloadFile('av-ahorros-datos-danados.json', fatalRaw),
+    'auto-days': () => {
+      const input = document.getElementById('auto-days');
+      const days = Number(input.value);
+      if (!Number.isInteger(days) || days < 1 || days > C.MAX_AUTO_DAYS) {
+        toast('Escribe un número de días entre 1 y ' + C.MAX_AUTO_DAYS + '.');
+        input.focus();
+        return;
+      }
+      setAutoEvery(days);
+    },
   };
+
+  /* ---------- Ahorro automático ---------- */
+
+  function setAutoEvery(days) {
+    state.auto.everyDays = days;
+    state.auto.next = C.addDays(C.todayISO(), days);
+    autoCustomOpen = days !== 7 && days !== 15;
+    save();
+    render();
+    refocus('[name="auto-every"]:checked');
+    toast('Ahora cada ' + plural(days, 'día', 'días') + '. Próximo traspaso: ' + formatDate(state.auto.next) + '.');
+  }
+
+  function setAutoEnabled(on) {
+    const today = C.todayISO();
+    const everyDays = state.auto.everyDays || 7;
+    state.auto = on
+      ? { enabled: true, everyDays, since: today, next: C.addDays(today, everyDays) }
+      : { enabled: false, everyDays, since: null, next: null };
+    autoCustomOpen = false;
+    save();
+    render();
+    refocus('#auto-on');
+    toast(on ? 'Ahorro automático activado. Primer traspaso: ' + formatDate(state.auto.next) + '.' : 'Ahorro automático desactivado.');
+  }
+
+  function refocus(selector) {
+    const el = main.querySelector(selector);
+    if (el) el.focus();
+  }
+
+  /* Hace los traspasos que tocan. No corre con un formulario abierto para no cambiar los datos que se editan. */
+  function applyAuto() {
+    if (!state || !state.onboarded || !state.auto.enabled || sheet.open || confirmDlg.open) return;
+    const result = C.runAuto(state, C.todayISO());
+    if (!result.changed) return;
+    save();
+    if (result.created.length) {
+      const total = result.created.reduce((sum, m) => sum + m.amount, 0);
+      const goal = state.goals.find((g) => g.id === result.created[0].goalId);
+      toast('Ahorro automático: se pasaron ' + money(total) + ' a “' + goal.name + '”.');
+    }
+    render();
+  }
 
   document.addEventListener('click', (event) => {
     const el = event.target.closest('[data-action]');
@@ -812,7 +902,22 @@
       render();
       toast('Moneda actualizada. Los montos no se convirtieron.');
     }
+    if (event.target.id === 'auto-on') setAutoEnabled(event.target.checked);
+    if (event.target.name === 'auto-every') {
+      if (event.target.value === 'other') {
+        autoCustomOpen = true;
+        render();
+        refocus('#auto-days');
+      } else {
+        setAutoEvery(Number(event.target.value));
+      }
+    }
   });
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') applyAuto();
+  });
+  setInterval(applyAuto, 10 * 60 * 1000);
 
   window.addEventListener('hashchange', () => { closeSheet(); render(); });
 
@@ -846,6 +951,7 @@
   if (initial.corrupt) fatalRaw = initial.corrupt;
   else if (initial.state) state = initial.state;
   render();
+  applyAuto();
 
   if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
     navigator.serviceWorker.register('sw.js').catch(() => {});

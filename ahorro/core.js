@@ -7,6 +7,8 @@
   const MAX_AMOUNT = 99999999999999;
   const MAX_NAME = 60;
   const MAX_NOTE = 120;
+  const MAX_AUTO_DAYS = 365;
+  const AUTO_NOTE = 'Ahorro automático';
 
   const CURRENCIES = [
     ['MXN', 'Peso mexicano'], ['USD', 'Dólar estadounidense'], ['EUR', 'Euro'],
@@ -34,7 +36,13 @@
       moves: [],
       txs: [],
       categories: DEFAULT_CATEGORIES.map((name) => ({ id: newId(), name, budget: 0 })),
+      auto: defaultAuto(),
     };
+  }
+
+  /* Ahorro automático: since = desde cuándo cuenta el dinero, next = próxima fecha de traspaso. */
+  function defaultAuto() {
+    return { enabled: false, everyDays: 7, since: null, next: null };
   }
 
   /* Acepta "1234", "1,234.50", "1.234,50" y "12,5". Devuelve centésimas, o null si no es válido. */
@@ -128,6 +136,68 @@
     return a.date < b.date ? 1 : a.date > b.date ? -1 : 0;
   }
 
+  function addDays(iso, days) {
+    const [y, m, d] = iso.split('-').map(Number);
+    const t = new Date(Date.UTC(y, m - 1, d + days));
+    return t.getUTCFullYear() + '-' + pad(t.getUTCMonth() + 1) + '-' + pad(t.getUTCDate());
+  }
+
+  function activeGoals(state) {
+    return state.goals.filter((g) => goalBalance(state, g.id) < g.target);
+  }
+
+  /* Dinero sin asignar entre dos fechas: ingresos menos gastos y menos lo que ya se pasó a metas.
+     Como cuenta los aportes, lo que ya se pasó nunca se vuelve a pasar. */
+  function autoPool(state, since, until) {
+    let sum = 0;
+    state.txs.forEach((t) => {
+      if (t.date >= since && t.date <= until) sum += t.type === 'income' ? t.amount : -t.amount;
+    });
+    state.moves.forEach((m) => {
+      if (m.date >= since && m.date <= until) sum -= signed(m);
+    });
+    return sum;
+  }
+
+  /* Lo que se pasaría en una fecha: nunca más de lo que le falta a la meta. */
+  function autoAmount(state, goal, until) {
+    return Math.max(0, Math.min(autoPool(state, state.auto.since, until), goal.target - goalBalance(state, goal.id)));
+  }
+
+  /* Hace los traspasos pendientes hasta hoy, incluidos los de días en que la app estuvo cerrada.
+     Si ese día no hay exactamente una meta en curso, no pasa nada y el dinero espera al siguiente. */
+  function runAuto(state, today) {
+    const auto = state.auto;
+    const result = { created: [], skipped: 0, changed: false };
+    if (!auto || !auto.enabled) return result;
+    for (let i = 0; i < 1000 && auto.next <= today; i += 1) {
+      const due = auto.next;
+      const goals = activeGoals(state);
+      if (goals.length === 1) {
+        const amount = autoAmount(state, goals[0], due);
+        if (amount > 0) {
+          const move = { id: newId(), goalId: goals[0].id, type: 'in', amount, date: due, note: AUTO_NOTE };
+          state.moves.push(move);
+          result.created.push(move);
+        }
+      } else {
+        result.skipped += 1;
+      }
+      auto.next = addDays(due, auto.everyDays);
+      result.changed = true;
+    }
+    return result;
+  }
+
+  function sanitizeAuto(raw) {
+    if (!raw || typeof raw !== 'object') return defaultAuto();
+    const everyDays = Number.isSafeInteger(raw.everyDays) && raw.everyDays >= 1 && raw.everyDays <= MAX_AUTO_DAYS ? raw.everyDays : 7;
+    if (raw.enabled === true && isDate(raw.since) && isDate(raw.next) && raw.next > raw.since) {
+      return { enabled: true, everyDays, since: raw.since, next: raw.next };
+    }
+    return { enabled: false, everyDays, since: null, next: null };
+  }
+
   /* Valida un respaldo sin confiar en su contenido y conserva solo los campos conocidos. */
   function sanitizeBackup(input) {
     const fail = (msg) => { throw new Error(msg); };
@@ -175,14 +245,16 @@
       onboarded: true,
       lastBackup: typeof input.lastBackup === 'string' && isDate(input.lastBackup) ? input.lastBackup : null,
       goals, moves, txs, categories,
+      auto: sanitizeAuto(input.auto),
     };
     if (goals.some((g) => goalBalance(state, g.id) < 0)) fail('El respaldo tiene una meta con saldo negativo.');
     return state;
   }
 
   root.AlcanciaCore = {
-    SCHEMA, MAX_AMOUNT, MAX_NAME, MAX_NOTE, CURRENCIES,
+    SCHEMA, MAX_AMOUNT, MAX_NAME, MAX_NOTE, MAX_AUTO_DAYS, CURRENCIES,
     newId, emptyState, parseAmount, centsToInput, todayISO, isDate, shiftMonth, daysBetween,
     signed, goalBalance, totalSaved, monthSummary, categorySpend, byDateDesc, sanitizeBackup,
+    addDays, activeGoals, autoPool, autoAmount, runAuto,
   };
 })(typeof window !== 'undefined' ? window : self);

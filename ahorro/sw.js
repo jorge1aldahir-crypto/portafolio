@@ -1,5 +1,5 @@
 /* Sube CACHE en cada publicación para que los dispositivos reciban los archivos nuevos. */
-const CACHE = 'av-ahorros-1.2.1';
+const CACHE = 'av-ahorros-1.3.0';
 const FILES = [
   './',
   'index.html',
