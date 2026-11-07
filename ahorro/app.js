@@ -4,7 +4,7 @@
 
   const C = window.AlcanciaCore;
   const KEY = 'alcancia.v1';
-  const VERSION = '1.3.0';
+  const VERSION = '1.4.0';
   const INSTALL_HIDDEN_KEY = 'avahorros.instalar.oculto';
   const MAX_IMPORT_BYTES = 5 * 1024 * 1024;
   const BACKUP_AFTER_DAYS = 30;
@@ -181,20 +181,33 @@
     const custom = autoCustomOpen || !preset;
     let body;
     if (!auto.enabled) {
-      body = '<p class="muted small">Cada cierto número de días pasa a tu meta el dinero que te sobra (ingresos menos gastos). Solo funciona si tienes una sola meta en curso.</p>';
+      body = '<p class="muted small">Cada cierto número de días pasa el dinero que te sobra (ingresos menos gastos) a las metas que elijas, repartido en los porcentajes que quieras.</p>';
     } else {
-      const goals = C.activeGoals(state);
+      const { targets, parts } = C.autoPreview(state, C.todayISO());
       let status;
-      if (!goals.length) {
-        status = state.goals.length ? 'Todas tus metas están completas, así que no hay a dónde pasar el dinero.' : 'Crea una meta para empezar.';
-      } else if (goals.length > 1) {
-        status = '<span class="over">Tienes ' + goals.length + ' metas en curso.</span> Solo funciona con una; mientras tanto no se pasa nada y el dinero espera al siguiente traspaso.';
+      if (!state.goals.length) {
+        status = 'Crea una meta para empezar.';
+      } else if (!C.activeGoals(state).length) {
+        status = 'Todas tus metas están completas, así que no hay a dónde pasar el dinero.';
+      } else if (!targets.length) {
+        status = auto.splits.length
+          ? '<span class="over">Las metas que elegiste ya están completas.</span> Elige otras; mientras tanto, el dinero espera.'
+          : '<span class="over">Elige a qué metas pasar el dinero.</span> Tienes varias en curso; mientras tanto, el dinero espera.';
       } else {
-        const amount = C.autoAmount(state, goals[0], C.todayISO());
-        status = 'Próximo traspaso: <strong>' + esc(formatDate(auto.next)) + '</strong> a “' + esc(goals[0].name) + '”. '
-          + (amount > 0 ? 'Hoy hay <strong class="money">' + money(amount) + '</strong> para pasar.' : 'Por ahora no hay dinero disponible para pasar.');
+        status = 'Próximo traspaso: <strong>' + esc(formatDate(auto.next)) + '</strong>. '
+          + (parts.length
+            ? 'Hoy se pasarían ' + parts.map((p) => '<strong class="money">' + money(p.amount) + '</strong> a “' + esc(p.goal.name) + '”').join(', ') + '.'
+            : 'Por ahora no hay dinero disponible para pasar.');
       }
-      body = '<p class="field-label">Pasar el dinero cada</p>' + segField('auto-every', 'Frecuencia', [['7', '7 días'], ['15', '15 días'], ['other', 'Otro']], custom ? 'other' : String(auto.everyDays))
+      const shown = C.normalizeSplits(targets.map((t) => ({ goalId: t.goal.id, pct: t.weight })));
+      const reparto = shown.length
+        ? '<ul class="split-list">' + shown.map((s) => (
+          '<li><span>' + esc(state.goals.find((g) => g.id === s.goalId).name) + '</span><strong>' + s.pct + '%</strong></li>'
+        )).join('') + '</ul>'
+        : '<p class="muted small">Ninguna todavía.</p>';
+      body = '<div class="auto-split"><p class="field-label">Metas que reciben el dinero</p>' + reparto
+        + '<button class="btn" type="button" data-action="auto-splits">Elegir metas y porcentajes</button></div>'
+        + '<p class="field-label">Pasar el dinero cada</p>' + segField('auto-every', 'Frecuencia', [['7', '7 días'], ['15', '15 días'], ['other', 'Otro']], custom ? 'other' : String(auto.everyDays))
         + (custom
           ? '<div class="field"><label for="auto-days">Cada cuántos días</label><div class="inline">'
             + '<input class="input" id="auto-days" type="number" inputmode="numeric" min="1" max="' + C.MAX_AUTO_DAYS + '" value="' + (preset ? '' : auto.everyDays) + '">'
@@ -735,6 +748,7 @@
       if (!yes) return;
       state.moves = state.moves.filter((m) => m.goalId !== goal.id);
       state.goals = state.goals.filter((g) => g !== goal);
+      state.auto.splits = C.normalizeSplits(state.auto.splits.filter((s) => s.goalId !== goal.id));
       save();
       closeSheet();
       location.hash = '#metas';
@@ -837,7 +851,76 @@
       }
       setAutoEvery(days);
     },
+    'auto-splits': splitsForm,
+    'split-equal': () => {
+      const checked = splitRows().filter((r) => r.on.checked);
+      checked.forEach((r, i) => {
+        r.pct.value = Math.floor(100 / checked.length) + (i < 100 % checked.length ? 1 : 0);
+      });
+      updateSplitTotal();
+    },
   };
+
+  /* ---------- Reparto entre metas ---------- */
+
+  function splitRows() {
+    return [...sheet.querySelectorAll('.split-row')].map((row) => ({
+      id: row.dataset.goal,
+      on: row.querySelector('input[type="checkbox"]'),
+      pct: row.querySelector('input[type="number"]'),
+    }));
+  }
+
+  function updateSplitTotal() {
+    const rows = splitRows();
+    rows.forEach((r) => { r.pct.disabled = !r.on.checked; });
+    const checked = rows.filter((r) => r.on.checked);
+    if (checked.length === 1 && !checked[0].pct.value) checked[0].pct.value = 100;
+    const total = checked.reduce((sum, r) => sum + (Number(r.pct.value) || 0), 0);
+    const el = sheet.querySelector('.split-total');
+    el.textContent = 'Total: ' + total + '%' + (total === 100 ? '' : ' (debe ser 100%)');
+    el.classList.toggle('over', total !== 100);
+  }
+
+  function splitsForm() {
+    const goals = C.activeGoals(state);
+    if (!goals.length) {
+      toast(state.goals.length ? 'Todas tus metas están completas. Crea una nueva.' : 'Primero crea una meta.');
+      return;
+    }
+    const current = new Map(state.auto.splits.map((s) => [s.goalId, s.pct]));
+    if (!current.size && goals.length === 1) current.set(goals[0].id, 100);
+    const rows = goals.map((g) => {
+      const pct = current.get(g.id);
+      return '<div class="split-row" data-goal="' + esc(g.id) + '">'
+        + '<label class="split-check"><input type="checkbox" name="on-' + esc(g.id) + '"' + (pct ? ' checked' : '') + '><span>' + esc(g.name) + '</span></label>'
+        + '<span class="split-pct"><input class="input money" name="pct-' + esc(g.id) + '" type="number" inputmode="numeric" min="1" max="100" value="' + (pct || '') + '" aria-label="Porcentaje para ' + esc(g.name) + '"><span aria-hidden="true">%</span></span></div>';
+    }).join('');
+    openSheet('<form class="form" novalidate><h2 id="sheet-title">¿A qué metas pasar el dinero?</h2>'
+      + '<p class="help">Elige una o varias y reparte el 100%. Si una se completa, su parte se reparte entre las demás.</p>'
+      + '<div class="split-rows">' + rows + '</div>'
+      + '<div class="head-row"><p class="split-total" aria-live="polite"></p><button class="btn link" type="button" data-action="split-equal">Repartir en partes iguales</button></div>'
+      + actions('Guardar')
+      + '</form>', (data, fail) => {
+      const chosen = [];
+      for (const g of goals) {
+        if (!data.get('on-' + g.id)) continue;
+        const pct = Number(data.get('pct-' + g.id));
+        if (!Number.isInteger(pct) || pct < 1 || pct > 100) return fail('Revisa el porcentaje de “' + g.name + '”: debe ser un número entero de 1 a 100.', 'pct-' + g.id);
+        chosen.push({ goalId: g.id, pct });
+      }
+      if (!chosen.length) return fail('Elige al menos una meta.');
+      const total = chosen.reduce((sum, s) => sum + s.pct, 0);
+      if (total !== 100) return fail('Los porcentajes deben sumar 100%. Ahora suman ' + total + '%.');
+      state.auto.splits = chosen;
+      save();
+      closeSheet();
+      render();
+      toast('Reparto guardado.');
+    });
+    sheet.querySelector('form').addEventListener('input', updateSplitTotal);
+    updateSplitTotal();
+  }
 
   /* ---------- Ahorro automático ---------- */
 
@@ -854,9 +937,10 @@
   function setAutoEnabled(on) {
     const today = C.todayISO();
     const everyDays = state.auto.everyDays || 7;
+    const splits = state.auto.splits || [];
     state.auto = on
-      ? { enabled: true, everyDays, since: today, next: C.addDays(today, everyDays) }
-      : { enabled: false, everyDays, since: null, next: null };
+      ? { enabled: true, everyDays, since: today, next: C.addDays(today, everyDays), splits }
+      : { enabled: false, everyDays, since: null, next: null, splits };
     autoCustomOpen = false;
     save();
     render();
@@ -877,8 +961,9 @@
     save();
     if (result.created.length) {
       const total = result.created.reduce((sum, m) => sum + m.amount, 0);
-      const goal = state.goals.find((g) => g.id === result.created[0].goalId);
-      toast('Ahorro automático: se pasaron ' + money(total) + ' a “' + goal.name + '”.');
+      const ids = [...new Set(result.created.map((m) => m.goalId))];
+      const where = ids.length === 1 ? '“' + state.goals.find((g) => g.id === ids[0]).name + '”' : ids.length + ' metas';
+      toast('Ahorro automático: se pasaron ' + money(total) + ' a ' + where + '.');
     }
     render();
   }

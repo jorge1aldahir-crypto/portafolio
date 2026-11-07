@@ -42,7 +42,7 @@
 
   /* Ahorro automático: since = desde cuándo cuenta el dinero, next = próxima fecha de traspaso. */
   function defaultAuto() {
-    return { enabled: false, everyDays: 7, since: null, next: null };
+    return { enabled: false, everyDays: 7, since: null, next: null, splits: [] };
   }
 
   /* Acepta "1234", "1,234.50", "1.234,50" y "12,5". Devuelve centésimas, o null si no es válido. */
@@ -159,43 +159,108 @@
     return sum;
   }
 
-  /* Lo que se pasaría en una fecha: nunca más de lo que le falta a la meta. */
-  function autoAmount(state, goal, until) {
-    return Math.max(0, Math.min(autoPool(state, state.auto.since, until), goal.target - goalBalance(state, goal.id)));
+  /* Metas que reciben el dinero y su porcentaje. Sin reparto elegido, se usa la única meta en curso.
+     Las metas completas o borradas se saltan y su parte se reparte entre las demás. */
+  function autoTargets(state) {
+    const splits = state.auto.splits || [];
+    if (splits.length) {
+      return splits
+        .map((s) => ({ goal: state.goals.find((g) => g.id === s.goalId), weight: s.pct }))
+        .filter((t) => t.goal && goalBalance(state, t.goal.id) < t.goal.target);
+    }
+    const goals = activeGoals(state);
+    return goals.length === 1 ? [{ goal: goals[0], weight: 100 }] : [];
+  }
+
+  /* Reparte un monto por porcentaje sin pasarse de lo que le falta a cada meta.
+     Lo que una meta no puede recibir se reparte entre las otras; los centavos sobrantes van a las primeras. */
+  function distribute(state, targets, pool) {
+    const room = new Map(targets.map((t) => [t.goal.id, t.goal.target - goalBalance(state, t.goal.id)]));
+    const given = new Map();
+    let left = pool;
+    let open = targets.filter((t) => room.get(t.goal.id) > 0);
+    while (left > 0 && open.length) {
+      const weight = open.reduce((sum, t) => sum + t.weight, 0);
+      const shares = open.map((t) => Math.floor((left * t.weight) / weight));
+      let rest = left - shares.reduce((a, b) => a + b, 0);
+      for (let i = 0; rest > 0; i = (i + 1) % shares.length, rest -= 1) shares[i] += 1;
+      let round = 0;
+      open.forEach((t, i) => {
+        const amount = Math.min(shares[i], room.get(t.goal.id));
+        if (amount > 0) {
+          given.set(t.goal.id, (given.get(t.goal.id) || 0) + amount);
+          room.set(t.goal.id, room.get(t.goal.id) - amount);
+          round += amount;
+        }
+      });
+      left -= round;
+      if (!round) break;
+      open = open.filter((t) => room.get(t.goal.id) > 0);
+    }
+    return targets.filter((t) => given.get(t.goal.id) > 0).map((t) => ({ goal: t.goal, amount: given.get(t.goal.id) }));
+  }
+
+  /* Lo que se pasaría en una fecha y a qué metas. */
+  function autoPreview(state, until) {
+    const targets = autoTargets(state);
+    const pool = autoPool(state, state.auto.since, until);
+    return { targets, parts: targets.length && pool > 0 ? distribute(state, targets, pool) : [] };
   }
 
   /* Hace los traspasos pendientes hasta hoy, incluidos los de días en que la app estuvo cerrada.
-     Si ese día no hay exactamente una meta en curso, no pasa nada y el dinero espera al siguiente. */
+     Si ese día no hay a qué meta pasar el dinero, no pasa nada y el dinero espera al siguiente. */
   function runAuto(state, today) {
     const auto = state.auto;
     const result = { created: [], skipped: 0, changed: false };
     if (!auto || !auto.enabled) return result;
     for (let i = 0; i < 1000 && auto.next <= today; i += 1) {
       const due = auto.next;
-      const goals = activeGoals(state);
-      if (goals.length === 1) {
-        const amount = autoAmount(state, goals[0], due);
-        if (amount > 0) {
-          const move = { id: newId(), goalId: goals[0].id, type: 'in', amount, date: due, note: AUTO_NOTE };
-          state.moves.push(move);
-          result.created.push(move);
-        }
-      } else {
-        result.skipped += 1;
-      }
+      const { targets, parts } = autoPreview(state, due);
+      if (!targets.length) result.skipped += 1;
+      parts.forEach((p) => {
+        const move = { id: newId(), goalId: p.goal.id, type: 'in', amount: p.amount, date: due, note: AUTO_NOTE };
+        state.moves.push(move);
+        result.created.push(move);
+      });
       auto.next = addDays(due, auto.everyDays);
       result.changed = true;
     }
     return result;
   }
 
-  function sanitizeAuto(raw) {
+  /* Deja los porcentajes en enteros que suman 100, conservando las proporciones.
+     Cada meta elegida conserva al menos 1% para que nunca quede fuera del reparto. */
+  function normalizeSplits(splits) {
+    const list = splits.slice(0, 100);
+    const total = list.reduce((sum, s) => sum + s.pct, 0);
+    if (!total) return [];
+    const scaled = list.map((s) => (s.pct * 100) / total);
+    const out = list.map((s, i) => ({ goalId: s.goalId, pct: Math.max(1, Math.floor(scaled[i])) }));
+    let diff = 100 - out.reduce((sum, s) => sum + s.pct, 0);
+    const byFraction = scaled.map((x, i) => ({ i, frac: x - Math.floor(x) })).sort((a, b) => b.frac - a.frac);
+    for (let k = 0; diff > 0; k = (k + 1) % out.length, diff -= 1) out[byFraction[k].i].pct += 1;
+    while (diff < 0) {
+      const largest = out.reduce((best, s) => (s.pct > best.pct ? s : best));
+      largest.pct -= 1;
+      diff += 1;
+    }
+    return out;
+  }
+
+  function sanitizeAuto(raw, goalIds) {
     if (!raw || typeof raw !== 'object') return defaultAuto();
     const everyDays = Number.isSafeInteger(raw.everyDays) && raw.everyDays >= 1 && raw.everyDays <= MAX_AUTO_DAYS ? raw.everyDays : 7;
+    const seen = new Set();
+    const splits = (Array.isArray(raw.splits) ? raw.splits : []).slice(0, 100).filter((s) => {
+      const ok = s && goalIds.has(s.goalId) && !seen.has(s.goalId) && Number.isSafeInteger(s.pct) && s.pct >= 1 && s.pct <= 100;
+      if (ok) seen.add(s.goalId);
+      return ok;
+    }).map((s) => ({ goalId: s.goalId, pct: s.pct }));
+    const clean = normalizeSplits(splits);
     if (raw.enabled === true && isDate(raw.since) && isDate(raw.next) && raw.next > raw.since) {
-      return { enabled: true, everyDays, since: raw.since, next: raw.next };
+      return { enabled: true, everyDays, since: raw.since, next: raw.next, splits: clean };
     }
-    return { enabled: false, everyDays, since: null, next: null };
+    return { enabled: false, everyDays, since: null, next: null, splits: clean };
   }
 
   /* Valida un respaldo sin confiar en su contenido y conserva solo los campos conocidos. */
@@ -245,7 +310,7 @@
       onboarded: true,
       lastBackup: typeof input.lastBackup === 'string' && isDate(input.lastBackup) ? input.lastBackup : null,
       goals, moves, txs, categories,
-      auto: sanitizeAuto(input.auto),
+      auto: sanitizeAuto(input.auto, goalIds),
     };
     if (goals.some((g) => goalBalance(state, g.id) < 0)) fail('El respaldo tiene una meta con saldo negativo.');
     return state;
@@ -255,6 +320,6 @@
     SCHEMA, MAX_AMOUNT, MAX_NAME, MAX_NOTE, MAX_AUTO_DAYS, CURRENCIES,
     newId, emptyState, parseAmount, centsToInput, todayISO, isDate, shiftMonth, daysBetween,
     signed, goalBalance, totalSaved, monthSummary, categorySpend, byDateDesc, sanitizeBackup,
-    addDays, activeGoals, autoPool, autoAmount, runAuto,
+    addDays, activeGoals, autoPool, autoTargets, distribute, autoPreview, runAuto, normalizeSplits,
   };
 })(typeof window !== 'undefined' ? window : self);
